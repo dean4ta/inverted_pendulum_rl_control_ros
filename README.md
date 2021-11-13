@@ -15,3 +15,6 @@ Start the rl training node:
     
     rosrun inverted_pendulum_rl_control train_ddpg.py
 
+## Reinforcement Learning Source
+
+The DDPG algorithm used was inspired by the [simple-pytorch-rl](https://github.com/xtma/simple-pytorch-rl.git) repo.
