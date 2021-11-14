@@ -1,8 +1,11 @@
 import rospy
+import rospkg
 from rl_common.ddpg import ActorNet, CriticNet, Memory, Agent
 
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Float64
+
+from inverted_pendulum_rl_control.srv import SaveModel, SaveModelResponse
 
 from gazebo_msgs.srv import (
     SetModelConfiguration,
@@ -11,6 +14,8 @@ from gazebo_msgs.srv import (
 )
 
 import numpy as np
+import os
+import torch
 from collections import namedtuple
 
 TrainingRecord = namedtuple("TrainingRecord", ["ep", "reward"])
@@ -28,8 +33,11 @@ class TrainDDPG:
             "/rrbot/joint1_effort_controller/command", Float64, queue_size=10
         )
         self.reward_pub = rospy.Publisher("/reward", Float64, queue_size=10)
+        self.save_model_srv = rospy.Service("save_model", SaveModel, self.save_model)
+
         rospy.wait_for_service("/gazebo/set_model_configuration")
         self.reset()
+        self.agent = Agent()
         self.is_state_ready = False
         self.state = np.zeros(3)
         rospy.loginfo("Beginning Training")
@@ -61,15 +69,22 @@ class TrainDDPG:
         except rospy.ServiceException as e:
             rospy.logwarn("Service call failed: %s" % e)
         self.action_pub.publish(Float64(np.random.uniform(-20, 20)))
-        # TODO: consider adding a random torque to the robot as well
 
     def get_reward(self, state_next):
         reward = 0
         angle = self.angle_normalize(state_next[0])
         reward += 40 * np.exp(-np.abs(angle))
-        if np.abs(angle) < np.pi / 2 and self.episodes > 50:
+        if np.abs(angle) < np.pi / 2:
             reward += 5 * np.exp(-np.abs(state_next[1]))
             reward += 5 * np.exp(-np.abs(state_next[2]))
+            reward += 10 * np.exp(-np.abs(angle))
+            reward += 10
+        elif np.abs(angle) > np.pi / 2:
+            effort_encouragement = 10
+            reward += effort_encouragement - (
+                effort_encouragement
+                * np.exp(-np.abs(state_next[2] / effort_encouragement))
+            )
 
         if np.abs(state_next[2]) > 10:
             reward -= 20 * np.abs(state_next[2])
@@ -77,10 +92,28 @@ class TrainDDPG:
         self.reward_pub.publish(Float64(reward))
         return reward
 
+    def save_model(self, req):
+        rospack = rospkg.RosPack()
+        try:
+            file_path = rospack.get_path("inverted_pendulum_rl_control") + "/models/"
+            file_str = file_path + req.filename
+            os.mkdir(file_path)
+            torch.save(
+                self.agent.eval_anet.state_dict(),
+                file_str + "_actor.pkl",
+            )
+            torch.save(
+                self.agent.eval_cnet.state_dict(),
+                file_str + "_critic.pkl",
+            )
+            rospy.loginfo("Saved model as models/" + req.filename)
+            return SaveModelResponse(0)
+        except Exception as e:
+            rospy.logwarn("Failed to save model: %s" % e)
+            return SaveModelResponse(-1)
+
     # TODO: Restructure function to be callback based so process can be successfully exited with Ctrl+C
     def train(self):
-        agent = Agent()
-
         training_records = []
         running_reward, running_q = -1000, 0
         self.episodes = 0
@@ -88,7 +121,6 @@ class TrainDDPG:
             self.episodes = episode
             if rospy.is_shutdown():
                 return
-            max_action, min_action = 0, 0
             score = 0
             self.reset()
             # get first state for the episode
@@ -96,13 +128,14 @@ class TrainDDPG:
                 pass
             self.is_state_ready = False
             state = self.state
+            # action_prev = 0
 
-            for t in range(500):
+            t = 0
+            while t < 200:
                 if rospy.is_shutdown():
                     return
-                action = agent.select_action(state)[0]
-                # if np.abs(action) > :
-                #     continue  # terminate the episode
+                action = self.agent.select_action(state)[0]
+
                 self.action_pub.publish(Float64(action))
 
                 # get next state
@@ -111,18 +144,18 @@ class TrainDDPG:
                 self.is_state_ready = False
                 state_next = self.state
                 reward = self.get_reward(state_next)
+                if t == 0 and reward < 0:
+                    reward = 0
                 score += reward
 
-                if max_action < action:
-                    max_action = action
-                if min_action > action:
-                    min_action = action
-
-                agent.store_transition(Transition(state, action, reward, state_next))
+                self.agent.store_transition(
+                    Transition(state, action, reward, state_next)
+                )
                 state = state_next
-                if agent.memory.isfull:
-                    q = agent.update()
+                if self.agent.memory.isfull:
+                    q = self.agent.update()
                     running_q = 0.99 * running_q + 0.01 * q
+                t += 1
 
             running_reward = running_reward * 0.9 + score * 0.1
             training_records.append(TrainingRecord(episode, running_reward))
