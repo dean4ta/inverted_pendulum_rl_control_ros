@@ -13,29 +13,36 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.distributions import Normal
 
-parser = argparse.ArgumentParser(description='Solve the Pendulum-v1 with DDPG')
+parser = argparse.ArgumentParser(description="Solve the Pendulum-v1 with DDPG")
 parser.add_argument(
-    '--gamma', type=float, default=0.9, metavar='G', help='discount factor (default: 0.9)')
+    "--gamma",
+    type=float,
+    default=0.9,
+    metavar="G",
+    help="discount factor (default: 0.9)",
+)
 
-parser.add_argument('--seed', type=int, default=0, metavar='N', help='random seed (default: 0)')
-parser.add_argument('--render', action='store_true', help='render the environment')
 parser.add_argument(
-    '--log-interval',
+    "--seed", type=int, default=0, metavar="N", help="random seed (default: 0)"
+)
+parser.add_argument("--render", action="store_true", help="render the environment")
+parser.add_argument(
+    "--log-interval",
     type=int,
     default=10,
-    metavar='N',
-    help='interval between training status logs (default: 10)')
+    metavar="N",
+    help="interval between training status logs (default: 10)",
+)
 args = parser.parse_args()
 
 torch.manual_seed(args.seed)
 np.random.seed(args.seed)
 
-TrainingRecord = namedtuple('TrainingRecord', ['ep', 'reward'])
-Transition = namedtuple('Transition', ['s', 'a', 'r', 's_'])
+TrainingRecord = namedtuple("TrainingRecord", ["ep", "reward"])
+Transition = namedtuple("Transition", ["s", "a", "r", "s_"])
 
 
 class ActorNet(nn.Module):
-
     def __init__(self):
         super(ActorNet, self).__init__()
         self.fc = nn.Linear(3, 100)
@@ -43,12 +50,11 @@ class ActorNet(nn.Module):
 
     def forward(self, s):
         x = F.relu(self.fc(s))
-        u = 2.0 * torch.tanh(self.mu_head(x))
+        u = self.mu_head(x)
         return u
 
 
 class CriticNet(nn.Module):
-
     def __init__(self):
         super(CriticNet, self).__init__()
         self.fc = nn.Linear(4, 100)
@@ -60,7 +66,7 @@ class CriticNet(nn.Module):
         return state_value
 
 
-class Memory():
+class Memory:
 
     data_pointer = 0
     isfull = False
@@ -80,13 +86,13 @@ class Memory():
         return np.random.choice(self.memory, batch_size)
 
 
-class Agent():
+class Agent:
 
     max_grad_norm = 0.5
 
     def __init__(self):
         self.training_step = 0
-        self.var = 1.
+        self.var = 2.0
         self.eval_cnet, self.target_cnet = CriticNet().float(), CriticNet().float()
         self.eval_anet, self.target_anet = ActorNet().float(), ActorNet().float()
         self.memory = Memory(2000)
@@ -96,14 +102,17 @@ class Agent():
     def select_action(self, state):
         state = torch.from_numpy(state).float().unsqueeze(0)
         mu = self.eval_anet(state)
+        if mu.item() > 50.0:
+            mu = torch.tensor(50.0)
+        if mu.item() < -50.0:
+            mu = torch.tensor(-50.0)
         dist = Normal(mu, torch.tensor(self.var, dtype=torch.float))
         action = dist.sample()
-        action.clamp(-2.0, 2.0)
         return (action.item(),)
 
     def save_param(self):
-        torch.save(self.eval_anet.state_dict(), 'param/ddpg_anet_params.pkl')
-        torch.save(self.eval_cnet.state_dict(), 'param/ddpg_cnet_params.pkl')
+        torch.save(self.eval_anet.state_dict(), "param/ddpg_anet_params.pkl")
+        torch.save(self.eval_cnet.state_dict(), "param/ddpg_cnet_params.pkl")
 
     def store_transition(self, transition):
         self.memory.update(transition)
@@ -146,7 +155,7 @@ class Agent():
 
 
 def main():
-    env = gym.make('Pendulum-v1')
+    env = gym.make("Pendulum-v1")
     env.seed(args.seed)
 
     agent = Agent()
@@ -173,24 +182,28 @@ def main():
         training_records.append(TrainingRecord(i_ep, running_reward))
 
         if i_ep % args.log_interval == 0:
-            print('Step {}\tAverage score: {:.2f}\tAverage Q: {:.2f}'.format(
-                i_ep, running_reward, running_q))
+            print(
+                "Step {}\tAverage score: {:.2f}\tAverage Q: {:.2f}".format(
+                    i_ep, running_reward, running_q
+                )
+            )
         if running_reward > -200:
             print("Solved! Running reward is now {}!".format(running_reward))
             env.close()
             agent.save_param()
-            with open('log/ddpg_training_records.pkl', 'wb') as f:
+            with open("log/ddpg_training_records.pkl", "wb") as f:
                 pickle.dump(training_records, f)
             break
 
     env.close()
 
     plt.plot([r.ep for r in training_records], [r.reward for r in training_records])
-    plt.title('DDPG')
-    plt.xlabel('Episode')
-    plt.ylabel('Moving averaged episode reward')
+    plt.title("DDPG")
+    plt.xlabel("Episode")
+    plt.ylabel("Moving averaged episode reward")
     plt.savefig("img/ddpg.png")
     plt.show()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()
