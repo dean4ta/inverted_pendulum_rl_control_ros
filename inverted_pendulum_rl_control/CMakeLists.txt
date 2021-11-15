@@ -20,7 +20,9 @@ generate_messages(
 
 catkin_package()
 
-catkin_install_python(PROGRAMS scripts/train_ddpg.py
+catkin_install_python(PROGRAMS 
+  scripts/train_ddpg.py
+  scripts/eval_ddpg.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

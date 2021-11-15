@@ -1,4 +1,4 @@
-import rospy
+import rospkg
 import argparse
 import pickle
 from collections import namedtuple
@@ -149,9 +149,29 @@ class Agent:
         if self.training_step % 201 == 0:
             self.target_anet.load_state_dict(self.eval_anet.state_dict())
 
-        self.var = max(self.var * 0.999, 0.01)
+        self.var = max(self.var * 0.9995, 0.01)
 
         return q_eval.mean().item()
+
+
+class InferenceAgent:
+    def __init__(self):
+        self.nn = ActorNet().float()
+        rospack = rospkg.RosPack()
+        file_path = rospack.get_path("inverted_pendulum_rl_control") + "/models/"
+        file_str = file_path + "test_actor.pkl"
+        self.nn.load_state_dict(torch.load(file_str))
+
+    def select_action(self, state):
+        state = torch.from_numpy(state).float().unsqueeze(0)
+        mu = self.nn(state)
+        if mu.item() > 50.0:
+            mu = torch.tensor(50.0)
+        if mu.item() < -50.0:
+            mu = torch.tensor(-50.0)
+        dist = Normal(mu, torch.tensor(0.1, dtype=torch.float))
+        action = dist.sample()
+        return (action.item(),)
 
 
 def main():

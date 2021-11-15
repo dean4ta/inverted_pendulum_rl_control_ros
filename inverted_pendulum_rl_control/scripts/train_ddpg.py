@@ -5,12 +5,15 @@ from rl_common.ddpg import ActorNet, CriticNet, Memory, Agent
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Float64
 
-from inverted_pendulum_rl_control.srv import SaveModel, SaveModelResponse
+from inverted_pendulum_rl_control.srv import (
+    SaveModel,
+    SaveModelResponse,
+    SaveModelRequest,
+)
 
 from gazebo_msgs.srv import (
     SetModelConfiguration,
     SetModelConfigurationRequest,
-    SetModelConfigurationResponse,
 )
 
 import numpy as np
@@ -77,7 +80,7 @@ class TrainDDPG:
         if np.abs(angle) < np.pi / 2:
             reward += 5 * np.exp(-np.abs(state_next[1]))
             reward += 5 * np.exp(-np.abs(state_next[2]))
-            reward += 10 * np.exp(-np.abs(angle))
+            reward += 40 * np.exp(-np.abs(angle))
             reward += 10
         elif np.abs(angle) > np.pi / 2:
             effort_encouragement = 10
@@ -97,7 +100,8 @@ class TrainDDPG:
         try:
             file_path = rospack.get_path("inverted_pendulum_rl_control") + "/models/"
             file_str = file_path + req.filename
-            os.mkdir(file_path)
+            if not os.path.exists(file_path):
+                os.mkdir(file_path)
             torch.save(
                 self.agent.eval_anet.state_dict(),
                 file_str + "_actor.pkl",
@@ -117,7 +121,7 @@ class TrainDDPG:
         training_records = []
         running_reward, running_q = -1000, 0
         self.episodes = 0
-        for episode in range(500):
+        for episode in range(750):
             self.episodes = episode
             if rospy.is_shutdown():
                 return
@@ -144,7 +148,7 @@ class TrainDDPG:
                 self.is_state_ready = False
                 state_next = self.state
                 reward = self.get_reward(state_next)
-                if t == 0 and reward < 0:
+                if t < 5 and reward < 0:
                     reward = 0
                 score += reward
 
