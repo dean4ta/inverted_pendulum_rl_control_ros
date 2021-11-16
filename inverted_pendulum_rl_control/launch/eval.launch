@@ -1,0 +1,8 @@
+<launch>
+
+  <arg name="rl_model_name" default="trained_actor.pkl"/>
+  <rosparam param="rl_model_name" subst_value="True">$(arg rl_model_name)</rosparam>
+
+  <node name="eval_ddpg" pkg="inverted_pendulum_rl_control" type="eval_ddpg.py" output="screen"/>
+
+</launch>

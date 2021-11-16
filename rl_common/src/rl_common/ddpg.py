@@ -1,5 +1,4 @@
 import rospkg
-import argparse
 import pickle
 from collections import namedtuple
 
@@ -13,30 +12,6 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.distributions import Normal
 
-parser = argparse.ArgumentParser(description="Solve the Pendulum-v1 with DDPG")
-parser.add_argument(
-    "--gamma",
-    type=float,
-    default=0.9,
-    metavar="G",
-    help="discount factor (default: 0.9)",
-)
-
-parser.add_argument(
-    "--seed", type=int, default=0, metavar="N", help="random seed (default: 0)"
-)
-parser.add_argument("--render", action="store_true", help="render the environment")
-parser.add_argument(
-    "--log-interval",
-    type=int,
-    default=10,
-    metavar="N",
-    help="interval between training status logs (default: 10)",
-)
-args = parser.parse_args()
-
-torch.manual_seed(args.seed)
-np.random.seed(args.seed)
 
 TrainingRecord = namedtuple("TrainingRecord", ["ep", "reward"])
 Transition = namedtuple("Transition", ["s", "a", "r", "s_"])
@@ -92,7 +67,8 @@ class Agent:
 
     def __init__(self):
         self.training_step = 0
-        self.var = 2.0
+        self.var = 3.0
+        self.gamma = 0.9
         self.eval_cnet, self.target_cnet = CriticNet().float(), CriticNet().float()
         self.eval_anet, self.target_anet = ActorNet().float(), ActorNet().float()
         self.memory = Memory(2000)
@@ -102,10 +78,6 @@ class Agent:
     def select_action(self, state):
         state = torch.from_numpy(state).float().unsqueeze(0)
         mu = self.eval_anet(state)
-        if mu.item() > 50.0:
-            mu = torch.tensor(50.0)
-        if mu.item() < -50.0:
-            mu = torch.tensor(-50.0)
         dist = Normal(mu, torch.tensor(self.var, dtype=torch.float))
         action = dist.sample()
         return (action.item(),)
@@ -127,7 +99,7 @@ class Agent:
         s_ = torch.tensor([t.s_ for t in transitions], dtype=torch.float)
 
         with torch.no_grad():
-            q_target = r + args.gamma * self.target_cnet(s_, self.target_anet(s_))
+            q_target = r + self.gamma * self.target_cnet(s_, self.target_anet(s_))
         q_eval = self.eval_cnet(s, a)
 
         # update critic net
@@ -149,17 +121,17 @@ class Agent:
         if self.training_step % 201 == 0:
             self.target_anet.load_state_dict(self.eval_anet.state_dict())
 
-        self.var = max(self.var * 0.9995, 0.01)
+        self.var = max(self.var * 0.99, 0.01)
 
         return q_eval.mean().item()
 
 
 class InferenceAgent:
-    def __init__(self):
+    def __init__(self, model_name="trained_actor.pkl"):
         self.nn = ActorNet().float()
         rospack = rospkg.RosPack()
         file_path = rospack.get_path("inverted_pendulum_rl_control") + "/models/"
-        file_str = file_path + "test_actor.pkl"
+        file_str = file_path + model_name
         self.nn.load_state_dict(torch.load(file_str))
 
     def select_action(self, state):
@@ -176,7 +148,7 @@ class InferenceAgent:
 
 def main():
     env = gym.make("Pendulum-v1")
-    env.seed(args.seed)
+    env.seed(np.random.randint(0, 100))
 
     agent = Agent()
 
@@ -190,8 +162,6 @@ def main():
             action = agent.select_action(state)
             state_, reward, done, _ = env.step(action)
             score += reward
-            if args.render:
-                env.render()
             agent.store_transition(Transition(state, action, (reward + 8) / 8, state_))
             state = state_
             if agent.memory.isfull:
@@ -201,12 +171,6 @@ def main():
         running_reward = running_reward * 0.9 + score * 0.1
         training_records.append(TrainingRecord(i_ep, running_reward))
 
-        if i_ep % args.log_interval == 0:
-            print(
-                "Step {}\tAverage score: {:.2f}\tAverage Q: {:.2f}".format(
-                    i_ep, running_reward, running_q
-                )
-            )
         if running_reward > -200:
             print("Solved! Running reward is now {}!".format(running_reward))
             env.close()

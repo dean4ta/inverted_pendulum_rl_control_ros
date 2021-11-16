@@ -3,7 +3,7 @@ import rospkg
 from rl_common.ddpg import ActorNet, CriticNet, Memory, Agent
 
 from sensor_msgs.msg import JointState
-from std_msgs.msg import Float64
+from std_msgs.msg import Float64, Float64MultiArray
 
 from inverted_pendulum_rl_control.srv import (
     SaveModel,
@@ -36,6 +36,7 @@ class TrainDDPG:
             "/rrbot/joint1_effort_controller/command", Float64, queue_size=10
         )
         self.reward_pub = rospy.Publisher("/reward", Float64, queue_size=10)
+        self.state_pub = rospy.Publisher("/state", Float64MultiArray, queue_size=10)
         self.save_model_srv = rospy.Service("save_model", SaveModel, self.save_model)
 
         rospy.wait_for_service("/gazebo/set_model_configuration")
@@ -57,6 +58,11 @@ class TrainDDPG:
         # Normalize angle to -pi to pi
         return (angle + np.pi) % (2 * np.pi) - np.pi
 
+    def publish_state(self, state):
+        msg = Float64MultiArray()
+        msg.data = state
+        self.state_pub.publish(msg)
+
     def reset(self):
         req = SetModelConfigurationRequest()
         req.model_name = "rrbot"
@@ -77,17 +83,6 @@ class TrainDDPG:
         reward = 0
         angle = self.angle_normalize(state_next[0])
         reward += 40 * np.exp(-np.abs(angle))
-        if np.abs(angle) < np.pi / 2:
-            reward += 5 * np.exp(-np.abs(state_next[1]))
-            reward += 5 * np.exp(-np.abs(state_next[2]))
-            reward += 40 * np.exp(-np.abs(angle))
-            reward += 10
-        elif np.abs(angle) > np.pi / 2:
-            effort_encouragement = 10
-            reward += effort_encouragement - (
-                effort_encouragement
-                * np.exp(-np.abs(state_next[2] / effort_encouragement))
-            )
 
         if np.abs(state_next[2]) > 10:
             reward -= 20 * np.abs(state_next[2])
@@ -139,16 +134,19 @@ class TrainDDPG:
                 if rospy.is_shutdown():
                     return
                 action = self.agent.select_action(state)[0]
+                action_cap = np.clip(action, -50, 50)
 
-                self.action_pub.publish(Float64(action))
+                self.action_pub.publish(Float64(action_cap))
+                self.publish_state(state)
 
                 # get next state
-                while self.is_state_ready == False:
-                    pass
-                self.is_state_ready = False
+                for _ in range(2):  # allow time to pass before next state
+                    while self.is_state_ready == False:
+                        pass
+                    self.is_state_ready = False
                 state_next = self.state
                 reward = self.get_reward(state_next)
-                if t < 5 and reward < 0:
+                if t < 5:  # first few rewards seem to be random
                     reward = 0
                 score += reward
 

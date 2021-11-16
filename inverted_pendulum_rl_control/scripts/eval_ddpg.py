@@ -28,7 +28,8 @@ class EvalDDPG:
 
         rospy.wait_for_service("/gazebo/set_model_configuration")
         self.reset()
-        self.controller = InferenceAgent()
+        default_param = rospy.get_param("rl_model_name", "trained_actor.pkl")
+        self.controller = InferenceAgent(default_param)
         self.is_state_ready = False
         self.state = np.zeros(3)
         rospy.loginfo("Beginning Evaluation")
