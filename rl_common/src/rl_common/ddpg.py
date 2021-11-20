@@ -18,10 +18,10 @@ Transition = namedtuple("Transition", ["s", "a", "r", "s_"])
 
 
 class ActorNet(nn.Module):
-    def __init__(self):
+    def __init__(self, n_states=3, n_actions=1):
         super(ActorNet, self).__init__()
-        self.fc = nn.Linear(3, 100)
-        self.mu_head = nn.Linear(100, 1)
+        self.fc = nn.Linear(n_states, 100)
+        self.mu_head = nn.Linear(100, n_actions)
 
     def forward(self, s):
         x = F.relu(self.fc(s))
@@ -30,10 +30,10 @@ class ActorNet(nn.Module):
 
 
 class CriticNet(nn.Module):
-    def __init__(self):
+    def __init__(self, n_states=3, n_actions=1):
         super(CriticNet, self).__init__()
-        self.fc = nn.Linear(4, 100)
-        self.v_head = nn.Linear(100, 1)
+        self.fc = nn.Linear(n_states + n_actions, 100)
+        self.v_head = nn.Linear(100, n_actions)
 
     def forward(self, s, a):
         x = F.relu(self.fc(torch.cat([s, a], dim=1)))
@@ -53,9 +53,11 @@ class Memory:
     def update(self, transition):
         self.memory[self.data_pointer] = transition
         self.data_pointer += 1
-        if self.data_pointer == self.capacity:
+        if self.data_pointer >= self.capacity:
             self.data_pointer = 0
             self.isfull = True
+        else:
+            self.isfull = False
 
     def sample(self, batch_size):
         return np.random.choice(self.memory, batch_size)
@@ -65,13 +67,19 @@ class Agent:
 
     max_grad_norm = 0.5
 
-    def __init__(self):
+    def __init__(self, n_states=3, n_actions=1):
         self.training_step = 0
         self.var = 3.0
         self.gamma = 0.9
-        self.eval_cnet, self.target_cnet = CriticNet().float(), CriticNet().float()
-        self.eval_anet, self.target_anet = ActorNet().float(), ActorNet().float()
-        self.memory = Memory(2000)
+        self.eval_cnet, self.target_cnet = (
+            CriticNet(n_states=n_states, n_actions=n_actions).float(),
+            CriticNet(n_states=n_states, n_actions=n_actions).float(),
+        )
+        self.eval_anet, self.target_anet = (
+            ActorNet(n_states=n_states, n_actions=n_actions).float(),
+            ActorNet(n_states=n_states, n_actions=n_actions).float(),
+        )
+        self.memory = Memory(1000)
         self.optimizer_c = optim.Adam(self.eval_cnet.parameters(), lr=1e-3)
         self.optimizer_a = optim.Adam(self.eval_anet.parameters(), lr=3e-4)
 
@@ -80,7 +88,7 @@ class Agent:
         mu = self.eval_anet(state)
         dist = Normal(mu, torch.tensor(self.var, dtype=torch.float))
         action = dist.sample()
-        return (action.item(),)
+        return action.numpy()
 
     def save_param(self):
         torch.save(self.eval_anet.state_dict(), "param/ddpg_anet_params.pkl")
@@ -93,10 +101,12 @@ class Agent:
         self.training_step += 1
 
         transitions = self.memory.sample(32)
-        s = torch.tensor([t.s for t in transitions], dtype=torch.float)
-        a = torch.tensor([t.a for t in transitions], dtype=torch.float).view(-1, 1)
-        r = torch.tensor([t.r for t in transitions], dtype=torch.float).view(-1, 1)
-        s_ = torch.tensor([t.s_ for t in transitions], dtype=torch.float)
+        s = torch.tensor(np.array([t.s for t in transitions]), dtype=torch.float)
+        a = torch.tensor(np.array([t.a for t in transitions]), dtype=torch.float)
+        r = torch.tensor(np.array([t.r for t in transitions]), dtype=torch.float).view(
+            -1, 1
+        )
+        s_ = torch.tensor(np.array([t.s_ for t in transitions]), dtype=torch.float)
 
         with torch.no_grad():
             q_target = r + self.gamma * self.target_cnet(s_, self.target_anet(s_))
