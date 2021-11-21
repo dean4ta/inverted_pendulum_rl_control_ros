@@ -1,0 +1,7 @@
+<launch>
+
+  <rosparam file="$(find inverted_pendulum_rl_control)/config/target_stance.yaml" command="load"/>
+
+  <node name="eval_ddpg" pkg="inverted_pendulum_rl_control" type="train_ddpg.py" output="screen"/>
+
+</launch>

@@ -43,6 +43,8 @@ class TrainDDPG:
         self.state_pub = rospy.Publisher("/state", Float64MultiArray, queue_size=10)
         self.save_model_srv = rospy.Service("save_model", SaveModel, self.save_model)
 
+        self.standing_joints = rospy.get_param("standing_joint_position")
+
         self.wait_for_services()
         self.reset()
         self.agent = Agent(n_states=N_JOINTS * S_PER_JOINT, n_actions=N_JOINTS)
@@ -192,8 +194,10 @@ class TrainDDPG:
             np.random.uniform(-MAX_RAND_Torque, MAX_RAND_Torque, (N_JOINTS,))
         )
 
-    def get_reward(self):
-        reward = self.model_state_pose.position.z * 10
+    def get_reward(self, state_next):
+        reward = 0
+        for joint in range(N_JOINTS):
+            reward += np.exp(-np.abs(state_next[joint] - self.standing_joints[joint]))
         self.reward_pub.publish(Float64(reward))
         return reward
 
@@ -222,9 +226,11 @@ class TrainDDPG:
     def train(self):
         training_records = []
         running_reward, running_q = -1000, 0
-        self.episodes = 0
-        for episode in range(750):
-            self.episodes = episode
+        self.episode = 0
+        tot_episodes = 10000
+        rospy.loginfo("Executing %s episodes" % tot_episodes)
+        for episode in range(tot_episodes):
+            self.episode = episode
             if rospy.is_shutdown():
                 return
             score = 0
@@ -246,13 +252,13 @@ class TrainDDPG:
                 self.publish_state(state)
 
                 # get next state
-                for _ in range(2):  # allow time to pass before next state
+                for _ in range(2):  # allow time for state to react to action
                     while self.is_state_ready == False:
                         pass
                     self.is_state_ready = False
                 state_next = self.state
-                reward = self.get_reward()
-                if t < 5:  # first few rewards seem to be random
+                reward = self.get_reward(state_next)
+                if t < 5:  # first few rewards seem to be random so we ignore them
                     reward = 0
                 score += reward
 
