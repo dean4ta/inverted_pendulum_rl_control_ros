@@ -2,3 +2,5 @@
 **.pkl
 !inverted_pendulum_rl_control/models/trained_actor.pkl
 !inverted_pendulum_rl_control/models/test_actor.pkl
+.vscode/c_cpp_properties.json
+.vscode/settings.json

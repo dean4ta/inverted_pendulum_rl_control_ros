@@ -23,6 +23,7 @@ catkin_package()
 catkin_install_python(PROGRAMS 
   scripts/train_ddpg.py
   scripts/eval_ddpg.py
+  scripts/pid_control.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
